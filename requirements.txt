@@ -29,3 +29,4 @@ uvicorn==0.53.0
 yarl==1.25.1
 python-multipart
 mistralai
+groq
