@@ -2,7 +2,7 @@ from typing import Dict
 
 from twilio.twiml.messaging_response import MessagingResponse
 
-from llm.mistral_client import understand_message
+from llm.groq_client import understand_message
 
 
 # Temporary in-memory storage.
