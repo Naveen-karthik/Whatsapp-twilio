@@ -2,9 +2,11 @@ from typing import Dict
 
 from twilio.twiml.messaging_response import MessagingResponse
 
+from llm.mistral_client import understand_message
+
 
 # Temporary in-memory storage.
-# Later we will replace this with Redis/MongoDB.
+# Later replace with Redis/MongoDB.
 sessions: Dict[str, dict] = {}
 
 
@@ -21,6 +23,30 @@ DOCTORS = {
         "name": "Dr. Kumar",
         "specialization": "Dental"
     }
+}
+
+
+APPOINTMENT_TYPES = {
+    "initial consultation": "Initial Consultation",
+    "follow-up consultation": "Follow-up Consultation",
+    "virtual meeting": "Virtual Meeting",
+    "in-person meeting": "In-person Meeting"
+}
+
+
+DATES = {
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "later": "Later"
+}
+
+
+VALID_TIMES = {
+    "11:00 AM",
+    "12:00 PM",
+    "2:00 PM",
+    "3:00 PM",
+    "5:00 PM"
 }
 
 
@@ -43,6 +69,7 @@ def get_session(phone_number: str):
 def twiml_text(message: str):
 
     response = MessagingResponse()
+
     response.message(message)
 
     return str(response)
@@ -54,19 +81,32 @@ def handle_message(phone_number: str, user_input: str):
 
     step = session["step"]
 
-    user_input_lower = user_input.lower().strip()
+    print("\n-------------------------------")
+    print(f"PHONE: {phone_number}")
+    print(f"STEP: {step}")
+    print(f"USER: {user_input}")
 
-    # ---------------------------
+    # Ask Mistral to understand the user.
+    result = understand_message(
+        user_input=user_input,
+        current_step=step
+    )
+
+    intent = result.get("intent", "UNKNOWN")
+    value = result.get("value", "")
+    confidence = result.get("confidence", 0)
+
+    print(f"LLM INTENT: {intent}")
+    print(f"LLM VALUE: {value}")
+    print(f"LLM CONFIDENCE: {confidence}")
+
+    # -----------------------------------------
     # WELCOME
-    # ---------------------------
+    # -----------------------------------------
 
     if step == "WELCOME":
 
-        if user_input_lower in [
-            "yes",
-            "yes lets start",
-            "start"
-        ]:
+        if intent == "WELCOME_START":
 
             session["step"] = "PATIENT_NAME"
 
@@ -75,10 +115,7 @@ def handle_message(phone_number: str, user_input: str):
                 "May I have the patient's full name, please?"
             )
 
-        if user_input_lower in [
-            "working hours",
-            "hours"
-        ]:
+        if intent == "WORKING_HOURS":
 
             return twiml_text(
                 "🕘 Our working hours are:\n\n"
@@ -86,10 +123,7 @@ def handle_message(phone_number: str, user_input: str):
                 "9:00 AM - 6:00 PM"
             )
 
-        if user_input_lower in [
-            "exit",
-            "cancel"
-        ]:
+        if intent == "EXIT":
 
             session["step"] = "WELCOME"
 
@@ -101,48 +135,55 @@ def handle_message(phone_number: str, user_input: str):
         return twiml_text(
             "Welcome! 👋\n\n"
             "I can help you book an appointment quickly.\n\n"
-            "Shall we get started?"
+            "You can say:\n"
+            "• Start booking\n"
+            "• Working hours\n"
+            "• Exit"
         )
 
-    # ---------------------------
+    # -----------------------------------------
     # PATIENT NAME
-    # ---------------------------
+    # -----------------------------------------
 
     if step == "PATIENT_NAME":
 
-        session["patient_name"] = user_input
+        if intent != "PATIENT_NAME" or not value:
+
+            return twiml_text(
+                "Please provide the patient's full name."
+            )
+
+        session["patient_name"] = value
 
         session["step"] = "DOCTOR"
 
         return twiml_text(
-            f"Thanks, {user_input}! 😊\n\n"
+            f"Thanks, {value}! 😊\n\n"
             "Please choose a doctor:\n\n"
             "1. Dr. Shalini - Dermatologist\n"
             "2. Dr. Raj - Pediatrician\n"
             "3. Dr. Kumar - Dental"
         )
 
-    # ---------------------------
+    # -----------------------------------------
     # DOCTOR
-    # ---------------------------
+    # -----------------------------------------
 
     if step == "DOCTOR":
 
-        doctor = None
+        if intent != "SELECT_DOCTOR":
 
-        if "shalini" in user_input_lower:
-            doctor = DOCTORS["doctor_shalini"]
+            return twiml_text(
+                "Please select one of our available doctors."
+            )
 
-        elif "raj" in user_input_lower:
-            doctor = DOCTORS["doctor_raj"]
-
-        elif "kumar" in user_input_lower:
-            doctor = DOCTORS["doctor_kumar"]
+        doctor = DOCTORS.get(value)
 
         if not doctor:
 
             return twiml_text(
-                "Please select one of the available doctors."
+                "I couldn't identify that doctor.\n\n"
+                "Please choose Dr. Shalini, Dr. Raj, or Dr. Kumar."
             )
 
         session["doctor"] = doctor
@@ -159,29 +200,26 @@ def handle_message(phone_number: str, user_input: str):
             "4. In-person Meeting"
         )
 
-    # ---------------------------
+    # -----------------------------------------
     # APPOINTMENT TYPE
-    # ---------------------------
+    # -----------------------------------------
 
     if step == "APPOINTMENT_TYPE":
 
-        appointment_types = {
-            "initial consultation": "Initial Consultation",
-            "follow up consultation": "Follow-up Consultation",
-            "follow-up consultation": "Follow-up Consultation",
-            "virtual meeting": "Virtual Meeting",
-            "in person meeting": "In-person Meeting",
-            "in-person meeting": "In-person Meeting"
-        }
+        if intent != "SELECT_APPOINTMENT_TYPE":
 
-        appointment_type = appointment_types.get(
-            user_input_lower
+            return twiml_text(
+                "Please select a valid appointment type."
+            )
+
+        appointment_type = APPOINTMENT_TYPES.get(
+            value.lower()
         )
 
         if not appointment_type:
 
             return twiml_text(
-                "Please select a valid appointment type."
+                "Please choose one of the available appointment types."
             )
 
         session["appointment_type"] = appointment_type
@@ -195,31 +233,30 @@ def handle_message(phone_number: str, user_input: str):
             "3. Later"
         )
 
-    # ---------------------------
+    # -----------------------------------------
     # DATE
-    # ---------------------------
+    # -----------------------------------------
 
     if step == "DATE":
 
-        if "today" in user_input_lower:
+        if intent != "SELECT_DATE":
 
-            selected_date = "Today"
+            return twiml_text(
+                "Please select Today, Tomorrow, or Later."
+            )
 
-        elif "tomorrow" in user_input_lower:
+        selected_date = DATES.get(
+            value.lower()
+        )
 
-            selected_date = "Tomorrow"
-
-        elif "later" in user_input_lower:
-
-            selected_date = "Later"
-
-        else:
+        if not selected_date:
 
             return twiml_text(
                 "Please select Today, Tomorrow, or Later."
             )
 
         session["date"] = selected_date
+
         session["step"] = "TIME"
 
         return twiml_text(
@@ -232,27 +269,32 @@ def handle_message(phone_number: str, user_input: str):
             "5:00 PM"
         )
 
-    # ---------------------------
+    # -----------------------------------------
     # TIME
-    # ---------------------------
+    # -----------------------------------------
 
     if step == "TIME":
 
-        valid_times = [
-            "11:00 am",
-            "12:00 pm",
-            "2:00 pm",
-            "3:00 pm",
-            "5:00 pm"
-        ]
+        if intent != "SELECT_TIME":
 
-        if user_input_lower not in valid_times:
+            return twiml_text(
+                "Please select one of the available time slots:\n\n"
+                "11:00 AM\n"
+                "12:00 PM\n"
+                "2:00 PM\n"
+                "3:00 PM\n"
+                "5:00 PM"
+            )
+
+        selected_time = value.strip().upper()
+
+        if selected_time not in VALID_TIMES:
 
             return twiml_text(
                 "Please select one of the available time slots."
             )
 
-        session["time"] = user_input
+        session["time"] = selected_time
 
         session["step"] = "CONFIRMED"
 
@@ -269,17 +311,17 @@ def handle_message(phone_number: str, user_input: str):
             f"Thank you! Your appointment is scheduled "
             f"for {session['date']} at {session['time']} "
             f"with {doctor['name']}.\n\n"
-            "If you need to reschedule, please reply "
-            "with 'reschedule'."
+            "If you need to reschedule, just say "
+            "'reschedule'."
         )
 
-    # ---------------------------
+    # -----------------------------------------
     # CONFIRMED
-    # ---------------------------
+    # -----------------------------------------
 
     if step == "CONFIRMED":
 
-        if "reschedule" in user_input_lower:
+        if intent == "RESCHEDULE":
 
             session["step"] = "DATE"
 
@@ -293,10 +335,11 @@ def handle_message(phone_number: str, user_input: str):
 
         return twiml_text(
             "Your appointment is already scheduled. ✅\n\n"
-            "Reply 'reschedule' if you want to change it."
+            "You can say 'reschedule' if you want to "
+            "change it."
         )
 
     return twiml_text(
-        "Sorry, something went wrong. Please type 'start' "
-        "to begin again."
+        "Sorry, something went wrong. "
+        "Please say 'start' to begin again."
     )
