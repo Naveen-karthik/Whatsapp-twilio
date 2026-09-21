@@ -11,7 +11,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-MODEL = "llama-3.1-8b-instant"
+MODEL = "openai/gpt-oss-20b"
 
 
 SYSTEM_PROMPT = """
